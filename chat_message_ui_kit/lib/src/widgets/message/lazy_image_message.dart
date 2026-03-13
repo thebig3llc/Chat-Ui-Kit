@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:chat_message_ui_kit/src/models/image_message.dart';
@@ -60,6 +61,8 @@ class _LazyImageMessageState extends State<LazyImageMessage>
   ImageProvider? _image;
   Size _size = Size.zero;
   ImageStream? _stream;
+  ImageStreamListener? _imageListener;
+  Timer? _disposeTimer;
   bool _isVisible = false;
   bool _hasError = false;
   Object? _error;
@@ -131,10 +134,11 @@ class _LazyImageMessageState extends State<LazyImageMessage>
       return;
     }
 
-    final listener = ImageStreamListener(_updateImage, onError: _onImageError);
+    // Reuse the same listener instance so removeListener can find it later (P-1).
+    _imageListener ??= ImageStreamListener(_updateImage, onError: _onImageError);
 
-    oldImageStream?.removeListener(listener);
-    _stream?.addListener(listener);
+    oldImageStream?.removeListener(_imageListener!);
+    _stream?.addListener(_imageListener!);
   }
 
   void _updateImage(ImageInfo info, bool _) {
@@ -158,10 +162,11 @@ class _LazyImageMessageState extends State<LazyImageMessage>
 
   /// Clean up image resources
   void _disposeImage() {
-    if (_stream != null) {
-      _stream?.removeListener(ImageStreamListener(_updateImage));
-      _stream = null;
+    if (_imageListener != null) {
+      _stream?.removeListener(_imageListener!);
+      _imageListener = null;
     }
+    _stream = null;
     _image = null;
   }
 
@@ -175,6 +180,8 @@ class _LazyImageMessageState extends State<LazyImageMessage>
 
   @override
   void dispose() {
+    _disposeTimer?.cancel();
+    _disposeTimer = null;
     _disposeImage();
     super.dispose();
   }
@@ -421,16 +428,18 @@ class _LazyImageMessageState extends State<LazyImageMessage>
             info.visibleFraction > 0.1; // Consider visible if >10% is shown
 
         if (_isVisible && !wasVisible) {
-          // Became visible - load image
+          // Became visible — cancel any pending dispose and load the image.
+          _disposeTimer?.cancel();
+          _disposeTimer = null;
           _loadImage();
         } else if (!_isVisible && wasVisible) {
-          // Became invisible - dispose image after delay
-          Future.delayed(const Duration(seconds: 30), () {
+          // Became invisible — schedule dispose after a short delay (P-9).
+          // Cancel any previous timer so only one is active at a time.
+          _disposeTimer?.cancel();
+          _disposeTimer = Timer(const Duration(seconds: 5), () {
             if (!_isVisible && mounted) {
               _disposeImage();
-              if (mounted) {
-                setState(() {});
-              }
+              setState(() {});
             }
           });
         }
@@ -456,6 +465,9 @@ class VisibilityDetector extends StatefulWidget {
 }
 
 class _VisibilityDetectorState extends State<VisibilityDetector> {
+  // P-11: gate so only one post-frame callback is queued at a time.
+  bool _pendingVisibilityCheck = false;
+
   @override
   Widget build(BuildContext context) {
     return NotificationListener<ScrollNotification>(
@@ -468,7 +480,10 @@ class _VisibilityDetectorState extends State<VisibilityDetector> {
   }
 
   void _checkVisibility() {
+    if (_pendingVisibilityCheck) return;
+    _pendingVisibilityCheck = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pendingVisibilityCheck = false;
       if (!mounted) return;
 
       final renderBox = context.findRenderObject() as RenderBox?;

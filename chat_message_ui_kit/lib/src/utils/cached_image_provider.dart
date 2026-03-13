@@ -16,7 +16,6 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
     this.maxCacheSize = 50,
     this.maxMemoryMB = 100,
     this.compressionQuality = 0.8,
-    this.enableDiskCache = false,
   });
 
   /// Image URL
@@ -37,11 +36,14 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
   /// Image compression quality (0.0 to 1.0)
   final double compressionQuality;
 
-  /// Whether to enable disk caching (experimental)
-  final bool enableDiskCache;
-
-  /// Static memory cache for all instances
+  /// Static memory cache for all instances.
+  /// Dart's default `{}` literal creates a LinkedHashMap, so insertion order
+  /// is preserved — we rely on this for O(1) LRU eviction (P-8).
   static final Map<String, _CacheEntry> _memoryCache = {};
+
+  /// In-flight load completers keyed by URL.
+  /// Prevents duplicate concurrent network requests for the same image (P-2).
+  static final Map<String, Completer<ui.Image>> _inFlight = {};
 
   /// Current memory usage estimate in bytes
   static int _currentMemoryUsage = 0;
@@ -75,32 +77,53 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
     ImageDecoderCallback decode,
   ) async {
     try {
-      // Check memory cache first
+      // P-8: Check memory cache and re-insert on hit to maintain LRU order.
+      // Dart's LinkedHashMap preserves insertion order; remove+reinsert moves
+      // the entry to the "most recently used" end.
       final cacheEntry = _memoryCache[url];
       if (cacheEntry != null && !cacheEntry.isExpired) {
+        _memoryCache.remove(url);
         cacheEntry.lastAccessed = DateTime.now();
+        _memoryCache[url] = cacheEntry;
         return ImageInfo(image: cacheEntry.image, scale: scale);
       }
 
-      // Load from network
-      final bytes = await _loadFromNetwork();
-
-      // Decode and optionally compress
-      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-      final descriptor = await ui.ImageDescriptor.encoded(buffer);
-      final codec = await descriptor.instantiateCodec();
-      final frame = await codec.getNextFrame();
-      ui.Image image = frame.image;
-
-      // Apply memory optimization
-      if (compressionQuality < 1.0) {
-        image = await _compressImage(image);
+      // P-2: Deduplicate concurrent loads for the same URL so we never issue
+      // two network requests for the same image simultaneously.
+      final existing = _inFlight[url];
+      if (existing != null) {
+        return ImageInfo(image: await existing.future, scale: scale);
       }
+      final completer = Completer<ui.Image>();
+      _inFlight[url] = completer;
 
-      // Cache the image
-      await _cacheImage(url, image);
+      try {
+        // Load from network
+        final bytes = await _loadFromNetwork();
 
-      return ImageInfo(image: image, scale: scale);
+        // Decode and optionally compress
+        final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+        final descriptor = await ui.ImageDescriptor.encoded(buffer);
+        final codec = await descriptor.instantiateCodec();
+        final frame = await codec.getNextFrame();
+        ui.Image image = frame.image;
+
+        // Apply memory optimization
+        if (compressionQuality < 1.0) {
+          image = await _compressImage(image);
+        }
+
+        // Cache the image
+        await _cacheImage(url, image);
+
+        completer.complete(image);
+        return ImageInfo(image: image, scale: scale);
+      } catch (loadError) {
+        completer.completeError(loadError);
+        rethrow;
+      } finally {
+        _inFlight.remove(url);
+      }
     } catch (e) {
       // Return a placeholder or error image
       return _createErrorImage();
@@ -186,28 +209,15 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
     return image.width * image.height * 4;
   }
 
-  /// Clean up memory cache to make space
+  /// Clean up memory cache to make space.
+  /// P-8: Uses O(1) LRU eviction from the front of the LinkedHashMap instead
+  /// of an O(n log n) sort. The LRU order is maintained by remove+reinsert on
+  /// every cache hit in [_loadAsync], so the first entry is always the least
+  /// recently used.
   Future<void> _cleanupMemoryCache({int additionalSize = 0}) async {
     final targetSize = _maxMemoryBytes - additionalSize;
 
-    if (_currentMemoryUsage <= targetSize) return;
-
-    // Sort by last accessed (LRU)
-    final entries =
-        _memoryCache.entries.toList()..sort(
-          (a, b) => a.value.lastAccessed.compareTo(b.value.lastAccessed),
-        );
-
-    // Remove oldest entries until under memory limit
-    for (final entry in entries) {
-      if (_currentMemoryUsage <= targetSize) break;
-
-      _memoryCache.remove(entry.key);
-      _currentMemoryUsage -= entry.value.size;
-      entry.value.image.dispose();
-    }
-
-    // Also remove expired entries
+    // Remove expired entries first.
     _memoryCache.removeWhere((key, value) {
       if (value.isExpired) {
         _currentMemoryUsage -= value.size;
@@ -216,6 +226,14 @@ class CachedImageProvider extends ImageProvider<CachedImageProvider> {
       }
       return false;
     });
+
+    // Evict the least-recently-used entry (map front) until under the limit.
+    while (_currentMemoryUsage > targetSize && _memoryCache.isNotEmpty) {
+      final lruKey = _memoryCache.keys.first;
+      final lruEntry = _memoryCache.remove(lruKey)!;
+      _currentMemoryUsage -= lruEntry.size;
+      lruEntry.image.dispose();
+    }
   }
 
   /// Create error image for failed loads

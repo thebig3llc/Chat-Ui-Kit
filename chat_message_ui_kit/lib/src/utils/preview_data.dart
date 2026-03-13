@@ -137,7 +137,7 @@ bool _hasUTF8Charset(Document document) {
     orElse: () => emptyElement,
   );
   if (element == emptyElement) return true;
-  return element.attributes['charset']!.toLowerCase() == 'utf-8';
+  return (element.attributes['charset'] ?? '').toLowerCase() == 'utf-8';
 }
 
 String? _getTitle(Document document) {

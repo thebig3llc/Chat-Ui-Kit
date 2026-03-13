@@ -157,7 +157,7 @@ class _LinkPreviewState extends State<LinkPreview>
       children: <Widget>[
         GestureDetector(
           onTap:
-              widget.openOnPreviewTitleTap
+              widget.openOnPreviewTitleTap && data.link != null
                   ? () {
                     _onOpen(data.link!);
                   }
@@ -178,7 +178,9 @@ class _LinkPreviewState extends State<LinkPreview>
             ),
           ),
         ),
-        if (data.image?.url != null && widget.hideImage != true)
+        if (data.image?.url != null &&
+            widget.hideImage != true &&
+            data.link != null)
           _imageWidget(data.image!.url, data.link!, width),
       ],
     );
@@ -331,7 +333,7 @@ class _LinkPreviewState extends State<LinkPreview>
                 Expanded(
                   child: GestureDetector(
                     onTap:
-                        widget.openOnPreviewTitleTap
+                        widget.openOnPreviewTitleTap && data.link != null
                             ? () => _onOpen(data.link!)
                             : null,
                     child: Container(
@@ -347,7 +349,9 @@ class _LinkPreviewState extends State<LinkPreview>
                     ),
                   ),
                 ),
-                if (data.image?.url != null && widget.hideImage != true)
+                if (data.image?.url != null &&
+                    widget.hideImage != true &&
+                    data.link != null)
                   _minimizedImageWidget(data.image!.url, data.link!),
               ],
             ),
@@ -373,7 +377,6 @@ class _LinkPreviewState extends State<LinkPreview>
     );
   }
 
-  //TODO: Continue from here with refactoring
   Future<void> _onOpen(String url) async {
     if (widget.onLinkPressed != null) {
       widget.onLinkPressed!(url);
@@ -434,10 +437,9 @@ class _LinkPreviewState extends State<LinkPreview>
         return widget.previewBuilder!(context, previewData);
       } else {
         final aspectRatio =
-            widget.previewData!.image == null
+            previewData.image == null
                 ? null
-                : widget.previewData!.image!.width /
-                    widget.previewData!.image!.height;
+                : previewData.image!.width / previewData.image!.height;
 
         final width = aspectRatio == 1 ? widget.width : widget.width - 32;
 

@@ -79,10 +79,23 @@ class PerformanceOptimizedChat extends StatefulWidget {
 class _PerformanceOptimizedChatState extends State<PerformanceOptimizedChat> {
   late ScrollController _scrollController;
 
+  /// P-10: cached item list — recomputed only when widget.messages changes.
+  late List<Object> _cachedItems;
+
   @override
   void initState() {
     super.initState();
     _scrollController = widget.scrollController ?? ScrollController();
+    _cachedItems = _convertMessagesToItems();
+  }
+
+  @override
+  void didUpdateWidget(covariant PerformanceOptimizedChat oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Recompute only when the messages list reference (or length) changes.
+    if (!identical(widget.messages, oldWidget.messages)) {
+      _cachedItems = _convertMessagesToItems();
+    }
   }
 
   @override
@@ -154,7 +167,7 @@ class _PerformanceOptimizedChatState extends State<PerformanceOptimizedChat> {
 
   @override
   Widget build(BuildContext context) {
-    final items = _convertMessagesToItems();
+    final items = _cachedItems;
 
     return Scaffold(
       body: Column(

@@ -378,29 +378,36 @@ class ChatState extends State<Chat> {
   }
 
   /// Scroll to the message with the specified [id].
+  /// If the message is not in the current visible list (e.g. not yet loaded),
+  /// this is a no-op.
   void scrollToMessage(
     String id, {
     Duration? scrollDuration,
     bool withHighlight = false,
     Duration? highlightDuration,
   }) async {
+    final index = _chatMessageAutoScrollIndexById[id];
+    if (index == null) return;
     await _scrollController.scrollToIndex(
-      _chatMessageAutoScrollIndexById[id]!,
+      index,
       duration: scrollDuration ?? scrollAnimationDuration,
       preferPosition: AutoScrollPosition.middle,
     );
     if (withHighlight) {
       await _scrollController.highlight(
-        _chatMessageAutoScrollIndexById[id]!,
+        index,
         highlightDuration: highlightDuration ?? const Duration(seconds: 3),
       );
     }
   }
 
   /// Highlight the message with the specified [id].
+  /// If the message is not in the current visible list, returns immediately.
   Future highlightMessage(String id, {Duration? duration}) {
+    final index = _chatMessageAutoScrollIndexById[id];
+    if (index == null) return Future.value();
     return _scrollController.highlight(
-      _chatMessageAutoScrollIndexById[id]!,
+      index,
       highlightDuration: duration ?? const Duration(seconds: 3),
     );
   }

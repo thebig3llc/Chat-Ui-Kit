@@ -196,15 +196,92 @@ class Message extends StatelessWidget {
         : const SizedBox(width: 40);
   }
 
+  Widget _repliedMessageWidget(
+    BuildContext context,
+    MessageModel replied,
+    bool currentUserIsAuthor,
+  ) {
+    final theme = InheritedChatTheme.of(context).theme;
+
+    String previewText;
+    if (replied is TextMessageModel) {
+      previewText = replied.text;
+    } else if (replied is ImageMessageModel) {
+      previewText = '📷 Photo';
+    } else if (replied is AudioMessageModel) {
+      previewText = '🎵 Audio message';
+    } else {
+      previewText = '🎥 Video message';
+    }
+
+    final accentColor =
+        currentUserIsAuthor
+            ? Colors.white.withValues(alpha: 0.6)
+            : theme.primaryColor;
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(left: BorderSide(color: accentColor, width: 3)),
+        color:
+            currentUserIsAuthor
+                ? Colors.black.withValues(alpha: 0.15)
+                : Colors.black.withValues(alpha: 0.05),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            getUserName(replied.author),
+            style: TextStyle(
+              color: accentColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            previewText,
+            style: (currentUserIsAuthor
+                    ? theme.sentMessageBodyTextStyle
+                    : theme.receivedMessageBodyTextStyle)
+                .copyWith(fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _bubbleBuilder(
     BuildContext context,
     BorderRadius borderRadius,
     bool currentUserIsAuthor,
     bool enlargeEmojis,
   ) {
+    final bubbleContent =
+        message.repliedMessage != null
+            ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _repliedMessageWidget(
+                  context,
+                  message.repliedMessage!,
+                  currentUserIsAuthor,
+                ),
+                _messageBuilder(context),
+              ],
+            )
+            : _messageBuilder(context);
+
     final defaultMessage =
         (enlargeEmojis && hideBackgroundOnEmojiMessages)
-            ? _messageBuilder()
+            ? bubbleContent
             : Container(
               decoration: BoxDecoration(
                 borderRadius: borderRadius,
@@ -215,25 +292,29 @@ class Message extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: borderRadius,
-                child: _messageBuilder(),
+                child: bubbleContent,
               ),
             );
     return bubbleBuilder != null
         ? bubbleBuilder!(
-          _messageBuilder(),
+          _messageBuilder(context),
           message: message,
           nextMessageInGroup: roundBorder,
         )
         : defaultMessage;
   }
 
-  Widget _messageBuilder() {
+  Widget _messageBuilder(BuildContext context) {
     switch (message.type) {
       case MessageType.audio:
         final audioMessage = message as AudioMessageModel;
         return audioMessageBuilder != null
             ? audioMessageBuilder!(audioMessage, messageWidth: messageWidth)
-            : const SizedBox();
+            : _unsupportedMessagePlaceholder(
+              context,
+              Icons.audiotrack_rounded,
+              'Audio message',
+            );
       case MessageType.image:
         final imageMessage = message as ImageMessageModel;
         return imageMessageBuilder != null
@@ -267,8 +348,42 @@ class Message extends StatelessWidget {
         final videoMessage = message as VideoMessageModel;
         return videoMessageBuilder != null
             ? videoMessageBuilder!(videoMessage, messageWidth: messageWidth)
-            : const SizedBox();
+            : _unsupportedMessagePlaceholder(
+              context,
+              Icons.videocam_rounded,
+              'Video message',
+            );
     }
+  }
+
+  /// Minimal labeled placeholder shown when no custom builder is provided for
+  /// audio or video messages. Avoids invisible const SizedBox() (L-1).
+  Widget _unsupportedMessagePlaceholder(
+    BuildContext context,
+    IconData icon,
+    String label,
+  ) {
+    final theme = InheritedChatTheme.of(context).theme;
+    final user = InheritedUser.of(context).user;
+    final isSent = user.id == message.author.id;
+    final textStyle =
+        isSent
+            ? theme.sentMessageBodyTextStyle
+            : theme.receivedMessageBodyTextStyle;
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: theme.messageInsetsHorizontal,
+        vertical: theme.messageInsetsVertical,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 20, color: textStyle.color),
+          const SizedBox(width: 8),
+          Text(label, style: textStyle),
+        ],
+      ),
+    );
   }
 
   Widget _statusIcon(BuildContext context) {

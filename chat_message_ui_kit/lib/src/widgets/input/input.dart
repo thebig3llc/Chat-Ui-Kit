@@ -147,10 +147,13 @@ class _InputState extends State<Input> {
     if (_textController.value.isComposingRangeValid) {
       return;
     }
-    // Update send button visibility based on text content
-    setState(() {
-      _sendButtonVisible = _textController.text.trim() != '';
-    });
+    // Only rebuild when visibility actually changes to avoid per-keystroke rebuilds.
+    final shouldShow = _textController.text.trim().isNotEmpty;
+    if (shouldShow != _sendButtonVisible) {
+      setState(() {
+        _sendButtonVisible = shouldShow;
+      });
+    }
   }
 
   /// Builds the complete input widget with text field, attachment button, and send button.

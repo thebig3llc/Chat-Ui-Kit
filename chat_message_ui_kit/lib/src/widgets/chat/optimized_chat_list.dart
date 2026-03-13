@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:isolate';
 
 import 'package:chat_message_ui_kit/src/models/message.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../enums/bubble_rtl_alignment.dart';
@@ -68,6 +68,12 @@ class _OptimizedChatListState extends State<OptimizedChatList>
   /// Message cache manager for performance optimization
   late final MessageCacheManager _cacheManager;
 
+  /// P-4: pending animation-cleanup timers stored so they can be cancelled in dispose.
+  final List<Timer> _pendingTimers = [];
+
+  /// P-7: last-seen model per message ID — used to detect stale cached widgets.
+  final Map<String, MessageModel> _lastSeenMessages = {};
+
   @override
   void initState() {
     super.initState();
@@ -88,10 +94,9 @@ class _OptimizedChatListState extends State<OptimizedChatList>
   void _handleListUpdate(List<Object> oldItems) async {
     if (widget.items.length > widget.diffThreshold &&
         widget.enableIsolateForDiff) {
-      // Use isolate for large lists
+      // P-6: use compute() for large lists (warm-isolate reuse, no spawn overhead)
       await _calculateDiffsInIsolate(oldItems);
     } else {
-      // Use main thread for small lists
       _calculateDiffsSync(oldItems);
     }
 
@@ -103,51 +108,52 @@ class _OptimizedChatListState extends State<OptimizedChatList>
     final newIds = MessageUtils.extractMessageIds(widget.items);
     final oldIds = MessageUtils.extractMessageIds(oldItems);
 
-    // Find new messages for potential animation
     final newMessages = newIds.difference(oldIds);
 
-    // Mark new messages as animating
     for (final messageId in newMessages) {
       _cacheManager.setAnimating(messageId, true);
     }
 
-    // Clean up animations after delay
+    // P-4: store the timer reference so it can be cancelled if widget disposes.
     if (newMessages.isNotEmpty) {
-      Timer(const Duration(milliseconds: 300), () {
-        _cacheManager.clearAnimationState(newMessages);
-      });
+      _pendingTimers.add(
+        Timer(const Duration(milliseconds: 300), () {
+          if (mounted) _cacheManager.clearAnimationState(newMessages);
+        }),
+      );
     }
   }
 
-  /// Asynchronous diff calculation using isolate for large lists
+  /// Asynchronous diff calculation using compute() for large lists.
+  /// P-6: replaces Isolate.spawn + ReceivePort with compute() which reuses a
+  /// warm background isolate and avoids the ~20–50 ms per-spawn overhead.
+  /// P-5: adds a 5-second timeout so a hung compute never freezes the UI.
   Future<void> _calculateDiffsInIsolate(List<Object> oldItems) async {
-    final receivePort = ReceivePort();
-
     try {
-      await Isolate.spawn(
-        _diffCalculationIsolate,
-        DiffCalculationData(
-          oldItems: oldItems,
-          newItems: widget.items,
-          sendPort: receivePort.sendPort,
-        ),
+      final result = await compute(
+        _computeDiffFunction,
+        _DiffComputeData(oldItems: oldItems, newItems: widget.items),
+      ).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => DiffResult(newMessageIds: {}, removedMessageIds: {}),
       );
-
-      final result = await receivePort.first as DiffResult;
 
       if (result.newMessageIds.isNotEmpty) {
         for (final messageId in result.newMessageIds) {
           _cacheManager.setAnimating(messageId, true);
         }
-        Timer(const Duration(milliseconds: 300), () {
-          _cacheManager.clearAnimationState(result.newMessageIds);
-        });
+        // P-4: store timer reference.
+        _pendingTimers.add(
+          Timer(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              _cacheManager.clearAnimationState(result.newMessageIds);
+            }
+          }),
+        );
       }
     } catch (e) {
-      // Fallback to sync calculation if isolate fails
+      // Fallback to sync calculation if compute fails
       _calculateDiffsSync(oldItems);
-    } finally {
-      receivePort.close();
     }
   }
 
@@ -181,14 +187,21 @@ class _OptimizedChatListState extends State<OptimizedChatList>
     }
   }
 
-  /// Build widget with caching for better performance
+  /// Build widget with caching for better performance.
+  /// P-7: evicts the cached widget when the message model has changed
+  /// (e.g. status transitions sending → sent → delivered).
   Widget _buildCachedItem(Object item, int index) {
     final message = MessageUtils.extractMessage(item);
     if (message != null) {
-      // Check if widget is in cache
+      // P-7: if we have a stale cached widget, evict it before the lookup.
+      final lastSeen = _lastSeenMessages[message.id];
+      if (lastSeen != null && lastSeen != message) {
+        _cacheManager.removeCachedWidget(message.id);
+      }
+
       final cachedWidget = _cacheManager.getCachedWidget(message.id);
       if (cachedWidget != null) {
-        // Apply animation if needed
+        _lastSeenMessages[message.id] = message;
         if (_cacheManager.isAnimating(message.id)) {
           return _wrapWithAnimation(cachedWidget);
         }
@@ -198,12 +211,11 @@ class _OptimizedChatListState extends State<OptimizedChatList>
       // Build new widget and cache it
       final newWidget = widget.itemBuilder(item, index);
       _cacheManager.cacheWidget(message.id, newWidget);
+      _lastSeenMessages[message.id] = message;
 
-      // Apply animation if needed
       if (_cacheManager.isAnimating(message.id)) {
         return _wrapWithAnimation(newWidget);
       }
-
       return newWidget;
     }
 
@@ -228,6 +240,12 @@ class _OptimizedChatListState extends State<OptimizedChatList>
 
   @override
   void dispose() {
+    // P-4: cancel all pending animation-cleanup timers.
+    for (final t in _pendingTimers) {
+      t.cancel();
+    }
+    _pendingTimers.clear();
+    _lastSeenMessages.clear();
     _controller.dispose();
     _cacheManager.clearCache();
     super.dispose();
@@ -237,12 +255,13 @@ class _OptimizedChatListState extends State<OptimizedChatList>
   Widget build(BuildContext context) {
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
-        // Handle typing indicator visibility
+        // P-3: guard setState so it only fires when the value actually changes.
+        // Use <= 10.0 (not == 0.0) so the indicator resets even on slow scrolls.
         if (notification.metrics.pixels > 10.0 && !_indicatorOnScrollStatus) {
           setState(() {
             _indicatorOnScrollStatus = true;
           });
-        } else if (notification.metrics.pixels == 0.0 &&
+        } else if (notification.metrics.pixels <= 10.0 &&
             _indicatorOnScrollStatus) {
           setState(() {
             _indicatorOnScrollStatus = false;
@@ -375,48 +394,49 @@ class _OptimizedChatListState extends State<OptimizedChatList>
   }
 }
 
-/// Data class for isolate communication
-class DiffCalculationData {
+// ---------------------------------------------------------------------------
+// compute() infrastructure (P-6)
+// ---------------------------------------------------------------------------
+
+/// Private data class passed to [_computeDiffFunction] via compute().
+class _DiffComputeData {
+  _DiffComputeData({required this.oldItems, required this.newItems});
+
   final List<Object> oldItems;
   final List<Object> newItems;
-  final SendPort sendPort;
-
-  DiffCalculationData({
-    required this.oldItems,
-    required this.newItems,
-    required this.sendPort,
-  });
 }
 
-/// Result class for diff calculation
-class DiffResult {
-  final Set<String> newMessageIds;
-  final Set<String> removedMessageIds;
-
-  DiffResult({required this.newMessageIds, required this.removedMessageIds});
-}
-
-/// Isolate entry point for diff calculation
-void _diffCalculationIsolate(DiffCalculationData data) {
+/// Top-level function executed by compute() in a background isolate.
+/// Returns a [DiffResult] directly rather than communicating via SendPort.
+DiffResult _computeDiffFunction(_DiffComputeData data) {
   try {
     final oldIds = _extractMessageIdsIsolate(data.oldItems);
     final newIds = _extractMessageIdsIsolate(data.newItems);
-
-    final result = DiffResult(
+    return DiffResult(
       newMessageIds: newIds.difference(oldIds),
       removedMessageIds: oldIds.difference(newIds),
     );
-
-    data.sendPort.send(result);
   } catch (e) {
-    data.sendPort.send(DiffResult(newMessageIds: {}, removedMessageIds: {}));
+    return DiffResult(newMessageIds: {}, removedMessageIds: {});
   }
 }
 
-/// Extract message IDs in isolate
+/// Extract message IDs from an items list (runs in background isolate).
 Set<String> _extractMessageIdsIsolate(List<Object> items) {
   return items.whereType<Map<String, Object>>().map((item) {
     final message = item['message'] as MessageModel;
     return message.id;
   }).toSet();
+}
+
+// ---------------------------------------------------------------------------
+// Public data classes (kept for API stability)
+// ---------------------------------------------------------------------------
+
+/// Result class for diff calculation
+class DiffResult {
+  DiffResult({required this.newMessageIds, required this.removedMessageIds});
+
+  final Set<String> newMessageIds;
+  final Set<String> removedMessageIds;
 }

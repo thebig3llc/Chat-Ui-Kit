@@ -15,6 +15,9 @@ import '../../inherited/inherited_chat_theme.dart';
 import '../../inherited/inherited_user.dart';
 import 'user_name.dart';
 
+// Cached compiled regex for URL detection — avoids recompiling on every build call.
+final _urlRegExp = RegExp(regexLink, caseSensitive: false);
+
 /// Widget that renders text messages with support for markdown, link previews, and emoji enlargement.
 /// This is the most common message type, handling plain text with advanced formatting capabilities
 /// including clickable links, preview cards for URLs, and special handling for emoji-only messages.
@@ -194,8 +197,7 @@ class TextMessage extends StatelessWidget {
 
     // Check if link preview should be shown (if enabled and URLs detected)
     if (usePreviewData && onPreviewDataFetched != null) {
-      final urlRegexp = RegExp(regexLink, caseSensitive: false);
-      final matches = urlRegexp.allMatches(message.text);
+      final matches = _urlRegExp.allMatches(message.text);
 
       // Show link preview widget if URLs are found in the text
       if (matches.isNotEmpty) {
