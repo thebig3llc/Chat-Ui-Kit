@@ -316,7 +316,7 @@ class _OptimizedChatListState extends State<OptimizedChatList>
             ),
             sliver: SliverToBoxAdapter(
               child: SizeTransition(
-                axisAlignment: 1,
+                alignment: AlignmentDirectional.bottomStart,
                 sizeFactor: _animation,
                 child: Center(
                   child: Container(

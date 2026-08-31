@@ -142,7 +142,7 @@ class _LinkPreviewState extends State<LinkPreview>
 
   Widget _animated(Widget child) => SizeTransition(
     axis: Axis.vertical,
-    axisAlignment: -1,
+    alignment: AlignmentDirectional.topStart,
     sizeFactor: _animation,
     child: child,
   );
