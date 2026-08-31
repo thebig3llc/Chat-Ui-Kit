@@ -5,7 +5,7 @@ homepage: https://github.com/thebig3llc/Chat-Message-Ui-Kit
 issue_tracker: https://github.com/thebig3llc/Chat-Message-Ui-Kit/issues
 
 environment:
-  sdk: ^3.7.2
+  sdk: ^3.9.2
   flutter: ">=1.17.0"
 
 dependencies:
