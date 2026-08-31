@@ -295,9 +295,6 @@ void main() {
         stopwatch.stop();
 
         final averageTime = stopwatch.elapsedMilliseconds / iterations;
-        print(
-          'Average thumbnail generation time: ${averageTime.toStringAsFixed(1)}ms',
-        );
 
         // Should be reasonably fast
         expect(averageTime, lessThan(100));
@@ -319,9 +316,6 @@ void main() {
         stopwatch.stop();
 
         final averageTime = stopwatch.elapsedMicroseconds / iterations;
-        print(
-          'Average optimization calculation time: ${averageTime.toStringAsFixed(1)}μs',
-        );
 
         // Should be very fast
         expect(averageTime, lessThan(100));

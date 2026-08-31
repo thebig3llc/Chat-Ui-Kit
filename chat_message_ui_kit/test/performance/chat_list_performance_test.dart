@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_unnecessary_containers
+
 import 'package:chat_message_ui_kit/src/models/message.dart';
 import 'package:chat_message_ui_kit/src/models/text_message.dart';
 import 'package:chat_message_ui_kit/src/models/chat_user.dart';
@@ -60,7 +62,6 @@ void main() {
       );
 
       stopwatch.stop();
-      print('Build time for 100 messages: ${stopwatch.elapsedMilliseconds}ms');
 
       // Verify the widget built successfully
       expect(find.byType(OptimizedChatList), findsOneWidget);
@@ -101,7 +102,6 @@ void main() {
       );
 
       stopwatch.stop();
-      print('Build time for 1000 messages: ${stopwatch.elapsedMilliseconds}ms');
 
       // Build time should be reasonable even for large lists
       expect(stopwatch.elapsedMilliseconds, lessThan(1000));
@@ -127,7 +127,7 @@ void main() {
               itemBuilder: (item, index) {
                 final messageData = item as Map<String, Object>;
                 final message = messageData['message'] as MessageModel;
-                return Container(
+                return SizedBox(
                   height: 60,
                   child: ListTile(
                     title: Text(message.id),
@@ -153,9 +153,6 @@ void main() {
       }
 
       stopwatch.stop();
-      print(
-        'Scroll performance for 10 scrolls: ${stopwatch.elapsedMilliseconds}ms',
-      );
 
       // Scrolling should be smooth (less than 100ms total for 10 scrolls)
       expect(stopwatch.elapsedMilliseconds, lessThan(1000));
@@ -175,9 +172,6 @@ void main() {
       }
 
       stopwatch.stop();
-      print(
-        'Cache operations for 200 widgets: ${stopwatch.elapsedMilliseconds}ms',
-      );
 
       // Cache should maintain max size
       expect(cacheManager.cacheSize, equals(100));
@@ -194,9 +188,6 @@ void main() {
       }
 
       retrievalStopwatch.stop();
-      print(
-        'Cache retrieval for 50 widgets: ${retrievalStopwatch.elapsedMilliseconds}ms',
-      );
 
       expect(retrievalStopwatch.elapsedMilliseconds, lessThan(50));
     });
@@ -213,9 +204,6 @@ void main() {
       }
 
       stopwatch.stop();
-      print(
-        'Message ID extraction (100 iterations): ${stopwatch.elapsedMilliseconds}ms',
-      );
 
       // Should be very fast
       expect(stopwatch.elapsedMilliseconds, lessThan(500));
@@ -230,9 +218,6 @@ void main() {
       }
 
       equalityStopwatch.stop();
-      print(
-        'List equality comparison (100 iterations): ${equalityStopwatch.elapsedMilliseconds}ms',
-      );
 
       expect(equalityStopwatch.elapsedMilliseconds, lessThan(500));
     });
@@ -344,12 +329,6 @@ void main() {
 
       regularStopwatch.stop();
 
-      print(
-        'OptimizedChatList build time: ${optimizedStopwatch.elapsedMilliseconds}ms',
-      );
-      print(
-        'Regular ListView build time: ${regularStopwatch.elapsedMilliseconds}ms',
-      );
 
       // OptimizedChatList should be competitive with regular ListView
       // Allow some overhead for the additional features
